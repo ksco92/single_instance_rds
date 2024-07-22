@@ -13,6 +13,6 @@ export const PASSWORD_ROTATION_INTERVAL = Duration.days(1);
 
 export const REMOVAL_POLICY = RemovalPolicy.DESTROY;
 
-export const BASTION_KEY_PAIR_NAME = 'plutus2-bastion';
+export const BASTION_KEY_PAIR_NAME = '';
 
-export const MY_IP_ADDRESS = '98.97.35.0';
+export const MY_IP_ADDRESS = '';
