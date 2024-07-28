@@ -19,13 +19,24 @@ import {
     Vpc,
 } from 'aws-cdk-lib/aws-ec2';
 import {
-    Credentials, DatabaseInstance, DatabaseInstanceEngine, StorageType,
+    Credentials,
+    DatabaseInstance,
+    DatabaseInstanceEngine,
+    PostgresEngineVersion,
+    StorageType,
 } from 'aws-cdk-lib/aws-rds';
 import {Key} from 'aws-cdk-lib/aws-kms';
 import {HostedRotation} from 'aws-cdk-lib/aws-secretsmanager';
 import {
-    Alarm, AlarmWidget, ComparisonOperator, Dashboard, MathExpression,
+    Alarm,
+    AlarmWidget,
+    ComparisonOperator,
+    Dashboard,
+    LogQueryVisualizationType,
+    LogQueryWidget,
+    MathExpression,
 } from 'aws-cdk-lib/aws-cloudwatch';
+import {RetentionDays} from 'aws-cdk-lib/aws-logs';
 import {
     APP_NAME,
     BASTION_KEY_PAIR_NAME,
@@ -36,6 +47,11 @@ import {
     RDS_PORT,
     REMOVAL_POLICY,
 } from './constants';
+
+// TODO: RDS CWL logs
+// TODO: VPC flow logs
+// TODO: Cloudtrail
+// TODO: Unit tests
 
 export default class SingleInstanceRdsStack extends cdk.Stack {
     constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -72,16 +88,19 @@ export default class SingleInstanceRdsStack extends cdk.Stack {
             },
         });
 
+        // RDS security group
         const rdsSecurityGroup = new SecurityGroup(this, 'RDSSecurityGroup', {
             securityGroupName: 'RDSSecurityGroup',
             vpc,
         });
 
+        // Credential rotation Lambda security group
         const rdsRotationSecurityGroup = new SecurityGroup(this, 'RDSRotationSecurityGroup', {
             securityGroupName: 'RDSRotationSecurityGroup',
             vpc,
         });
 
+        // Bastion security
         const bastionSecurityGroup = new SecurityGroup(this, 'BastionSecurityGroup', {
             securityGroupName: 'BastionSecurityGroup',
             vpc,
@@ -102,8 +121,11 @@ export default class SingleInstanceRdsStack extends cdk.Stack {
         /// /////////////////////////////////////////////////
         // RDS
 
+        // Database
         const rds = new DatabaseInstance(this, 'RDSDB', {
-            engine: DatabaseInstanceEngine.POSTGRES,
+            engine: DatabaseInstanceEngine.postgres({
+                version: PostgresEngineVersion.VER_16,
+            }),
             vpc,
             allowMajorVersionUpgrade: true,
             credentials: Credentials.fromGeneratedSecret(APP_NAME, {
@@ -134,8 +156,17 @@ export default class SingleInstanceRdsStack extends cdk.Stack {
             allocatedStorage: DB_STORAGE_GIB,
             storageType: StorageType.GP3,
             monitoringInterval: Duration.minutes(1),
+            enablePerformanceInsights: true,
+            cloudwatchLogsRetention: RetentionDays.ONE_YEAR,
+            cloudwatchLogsExports: [
+                'postgresql',
+            ],
+            parameters: {
+                log_min_duration_statement: '0',
+            },
         });
 
+        // Create the rotation credential
         rds.secret!.addRotationSchedule('RDSDBSecretRotation', {
             automaticallyAfter: PASSWORD_ROTATION_INTERVAL,
             hostedRotation: HostedRotation.postgreSqlSingleUser({
@@ -156,6 +187,7 @@ export default class SingleInstanceRdsStack extends cdk.Stack {
         /// /////////////////////////////////////////////////
         // Bastion
 
+        // EC2 instance
         const bastion = new Instance(this, 'BastionHost', {
             instanceType: InstanceType.of(InstanceClass.T3, InstanceSize.MICRO),
             machineImage: MachineImage.latestAmazonLinux2023(),
@@ -189,6 +221,7 @@ export default class SingleInstanceRdsStack extends cdk.Stack {
         /// /////////////////////////////////////////////////
         // Dashboard and alarms
 
+        // DB alarms
         const alarms = [
             // >= 90% CPU for over 3 minutes
             new Alarm(this, 'RDSCPUAlarm', {
@@ -221,6 +254,26 @@ export default class SingleInstanceRdsStack extends cdk.Stack {
             }),
         ];
 
+        // Logs widget
+        const logQueryWidget = new LogQueryWidget({
+            logGroupNames: [
+                `/aws/rds/instance/${APP_NAME}/postgresql`,
+            ],
+            title: 'Last 100 queries and durations',
+            view: LogQueryVisualizationType.TABLE,
+            queryString: `
+            filter @logStream = '${APP_NAME}.0'
+            | filter @message like /execute/
+            | fields @timestamp
+            | parse @message "duration: * ms  execute <unnamed>: *" as query_duration, sql_query
+            | sort @timestamp desc
+            | limit 100
+            `,
+            width: 12,
+            height: 12,
+        });
+
+        // CW dashboard
         new Dashboard(this, 'RDSDashboard', {
             dashboardName: 'RDSDashboard',
             widgets: [
@@ -228,6 +281,9 @@ export default class SingleInstanceRdsStack extends cdk.Stack {
                     alarm,
                     title: alarm.alarmName,
                 })),
+                [
+                    logQueryWidget,
+                ],
             ],
             defaultInterval: Duration.hours(12),
         });
@@ -238,11 +294,13 @@ export default class SingleInstanceRdsStack extends cdk.Stack {
         /// /////////////////////////////////////////////////
         // Outputs
 
+        // Bastion DNS
         new CfnOutput(this, 'BastionHostDNS', {
             value: bastion.instancePublicDnsName,
             exportName: 'BastionHostDNS',
         });
 
+        // Secret ARN
         new CfnOutput(this, 'RDSSecretARN', {
             value: rds.secret!.secretFullArn!,
             exportName: 'RDSSecretARN',
