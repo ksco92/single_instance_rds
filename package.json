@@ -10,7 +10,7 @@
         "test": "jest",
         "cdk": "cdk",
         "lint": "eslint --ext .ts lib/ --fix && eslint --ext .ts bin/ --fix && eslint --ext .ts test/ --fix",
-        "deploy": "rm -rf cdk.out && npm run lint && cdk deploy"
+        "deploy": "rm -rf cdk.out && npm run lint && npm run test && cdk deploy"
     },
     "devDependencies": {
         "@types/jest": "^29.5.12",

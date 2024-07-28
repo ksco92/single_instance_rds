@@ -48,10 +48,8 @@ import {
     REMOVAL_POLICY,
 } from './constants';
 
-// TODO: RDS CWL logs
 // TODO: VPC flow logs
 // TODO: Cloudtrail
-// TODO: Unit tests
 
 export default class SingleInstanceRdsStack extends cdk.Stack {
     constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -221,6 +219,9 @@ export default class SingleInstanceRdsStack extends cdk.Stack {
         /// /////////////////////////////////////////////////
         // Dashboard and alarms
 
+        const width = 6;
+        const height = 6;
+
         // DB alarms
         const alarms = [
             // >= 90% CPU for over 3 minutes
@@ -269,8 +270,8 @@ export default class SingleInstanceRdsStack extends cdk.Stack {
             | sort @timestamp desc
             | limit 100
             `,
-            width: 12,
-            height: 12,
+            width: width * 2,
+            height: height * 2,
         });
 
         // CW dashboard
@@ -280,6 +281,8 @@ export default class SingleInstanceRdsStack extends cdk.Stack {
                 alarms.map((alarm) => new AlarmWidget({
                     alarm,
                     title: alarm.alarmName,
+                    height,
+                    width,
                 })),
                 [
                     logQueryWidget,
