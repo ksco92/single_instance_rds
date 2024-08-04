@@ -38,7 +38,8 @@ test('Test resource creation', () => {
     template.resourceCountIs('AWS::EC2::VPCEndpoint', 1);
 
     // SGs for RDS, rotation Lambda, bastion host, SM endpoint,
-    template.resourceCountIs('AWS::EC2::SecurityGroup', 4);
+    // NAT instance
+    template.resourceCountIs('AWS::EC2::SecurityGroup', 5);
 
     /// /////////////////////////////////////////////////
     /// /////////////////////////////////////////////////

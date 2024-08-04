@@ -4,6 +4,9 @@
 
 **Another important note:** Please check the `lib/constants.ts` file to set the values you want. By default, the IP and KP name are blank and the deployment will fail unless you change it.
 
+**And another one:** Usually, single instance DBs are not production recommended due to availability and
+fault tolerance. Also, this uses a NAT instance instead of a NAT gateway for cost purposes.
+
 ## Summary
 
 This repo deploys a secure RDS instance in a private subnet. Additionally, it sets up password rotations for the

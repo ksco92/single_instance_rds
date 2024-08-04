@@ -1,5 +1,7 @@
 import * as cdk from 'aws-cdk-lib';
-import {CfnOutput, Duration, Tags} from 'aws-cdk-lib';
+import {
+    CfnOutput, Duration, RemovalPolicy, Tags,
+} from 'aws-cdk-lib';
 import {Construct} from 'constructs';
 import {
     BlockDeviceVolume,
@@ -11,7 +13,7 @@ import {
     InterfaceVpcEndpointAwsService,
     IpAddresses,
     KeyPair,
-    MachineImage,
+    MachineImage, NatProvider,
     Peer,
     Port,
     SecurityGroup,
@@ -21,7 +23,7 @@ import {
 import {
     Credentials,
     DatabaseInstance,
-    DatabaseInstanceEngine,
+    DatabaseInstanceEngine, PerformanceInsightRetention,
     PostgresEngineVersion,
     StorageType,
 } from 'aws-cdk-lib/aws-rds';
@@ -76,6 +78,10 @@ export default class SingleInstanceRdsStack extends cdk.Stack {
                 },
             ],
             maxAzs: 2,
+            natGatewayProvider: NatProvider.instanceV2({
+                instanceType: InstanceType.of(InstanceClass.T3, InstanceSize.MICRO),
+            }),
+            natGateways: 1,
         });
 
         // Secrets manager endpoint
@@ -155,6 +161,12 @@ export default class SingleInstanceRdsStack extends cdk.Stack {
             storageType: StorageType.GP3,
             monitoringInterval: Duration.minutes(1),
             enablePerformanceInsights: true,
+            performanceInsightRetention: PerformanceInsightRetention.MONTHS_3,
+            performanceInsightEncryptionKey: new Key(this, 'RDSDBInsightsKMSKey', {
+                enableKeyRotation: true,
+                alias: 'RDSDBInsightsKMSKey',
+                removalPolicy: RemovalPolicy.DESTROY,
+            }),
             cloudwatchLogsRetention: RetentionDays.ONE_YEAR,
             cloudwatchLogsExports: [
                 'postgresql',
