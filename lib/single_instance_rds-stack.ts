@@ -1,6 +1,5 @@
-import * as cdk from 'aws-cdk-lib';
 import {
-    CfnOutput, Duration, RemovalPolicy, Tags,
+    CfnOutput, Duration, RemovalPolicy, Stack, StackProps, Tags,
 } from 'aws-cdk-lib';
 import {Construct} from 'constructs';
 import {
@@ -13,7 +12,8 @@ import {
     InterfaceVpcEndpointAwsService,
     IpAddresses,
     KeyPair,
-    MachineImage, NatProvider,
+    MachineImage,
+    NatProvider,
     Peer,
     Port,
     SecurityGroup,
@@ -23,7 +23,8 @@ import {
 import {
     Credentials,
     DatabaseInstance,
-    DatabaseInstanceEngine, PerformanceInsightRetention,
+    DatabaseInstanceEngine,
+    PerformanceInsightRetention,
     PostgresEngineVersion,
     StorageType,
 } from 'aws-cdk-lib/aws-rds';
@@ -39,23 +40,44 @@ import {
     MathExpression,
 } from 'aws-cdk-lib/aws-cloudwatch';
 import {RetentionDays} from 'aws-cdk-lib/aws-logs';
-import {
-    APP_NAME,
-    BASTION_KEY_PAIR_NAME,
-    DB_INSTANCE_TYPE,
-    DB_STORAGE_GIB,
-    MY_IP_ADDRESS,
-    PASSWORD_ROTATION_INTERVAL,
-    RDS_PORT,
-    REMOVAL_POLICY,
-} from './constants';
 
 // TODO: VPC flow logs
 // TODO: Cloudtrail
 
-export default class SingleInstanceRdsStack extends cdk.Stack {
-    constructor(scope: Construct, id: string, props?: cdk.StackProps) {
+interface SingleInstanceRdsStackProps extends StackProps {
+    appName: string;
+    bastionKeyPairName: string;
+    myIpAddress: string;
+    dbInstanceType?: InstanceType;
+    dbStorageGib?: number;
+    passwordRotationInterval?: Duration;
+    rdsPort?: number;
+    removalPolicy?: RemovalPolicy;
+}
+
+export default class SingleInstanceRdsStack extends Stack {
+    vpc: Vpc;
+
+    rdsSecurityGroup: SecurityGroup;
+
+    bastionSecurityGroup: SecurityGroup;
+
+    rds: DatabaseInstance;
+
+    bastion: Instance;
+
+    constructor(scope: Construct, id: string, props: SingleInstanceRdsStackProps) {
         super(scope, id, props);
+
+        const dbInstanceType = props.dbInstanceType
+            ? props.dbInstanceType
+            : InstanceType.of(InstanceClass.T4G, InstanceSize.MICRO);
+        const dbStorageGib = props.dbStorageGib ? props.dbStorageGib : 20;
+        const passwordRotationInterval = props.passwordRotationInterval
+            ? props.passwordRotationInterval
+            : Duration.days(1);
+        const rdsPort = props.rdsPort ? props.rdsPort : 5432;
+        const removalPolicy = props.removalPolicy ? props.removalPolicy : RemovalPolicy.DESTROY;
 
         /// /////////////////////////////////////////////////
         /// /////////////////////////////////////////////////
@@ -64,7 +86,7 @@ export default class SingleInstanceRdsStack extends cdk.Stack {
         // Networking
 
         // VPC with 2 private and 2 public subnets
-        const vpc = new Vpc(this, 'MainVPC', {
+        this.vpc = new Vpc(this, 'MainVPC', {
             ipAddresses: IpAddresses.cidr('10.0.0.0/16'),
             vpcName: 'MainVPC',
             subnetConfiguration: [
@@ -85,7 +107,7 @@ export default class SingleInstanceRdsStack extends cdk.Stack {
         });
 
         // Secrets manager endpoint
-        vpc.addInterfaceEndpoint('SMEndpoint', {
+        this.vpc.addInterfaceEndpoint('SMEndpoint', {
             service: InterfaceVpcEndpointAwsService.SECRETS_MANAGER,
             subnets: {
                 subnetType: SubnetType.PRIVATE_WITH_EGRESS,
@@ -93,31 +115,31 @@ export default class SingleInstanceRdsStack extends cdk.Stack {
         });
 
         // RDS security group
-        const rdsSecurityGroup = new SecurityGroup(this, 'RDSSecurityGroup', {
+        this.rdsSecurityGroup = new SecurityGroup(this, 'RDSSecurityGroup', {
             securityGroupName: 'RDSSecurityGroup',
-            vpc,
+            vpc: this.vpc,
         });
 
         // Credential rotation Lambda security group
         const rdsRotationSecurityGroup = new SecurityGroup(this, 'RDSRotationSecurityGroup', {
             securityGroupName: 'RDSRotationSecurityGroup',
-            vpc,
+            vpc: this.vpc,
         });
 
         // Bastion security
-        const bastionSecurityGroup = new SecurityGroup(this, 'BastionSecurityGroup', {
+        this.bastionSecurityGroup = new SecurityGroup(this, 'BastionSecurityGroup', {
             securityGroupName: 'BastionSecurityGroup',
-            vpc,
+            vpc: this.vpc,
         });
 
         // Rotation Lambda to RDS
-        rdsSecurityGroup.addIngressRule(rdsRotationSecurityGroup, Port.tcp(RDS_PORT));
+        this.rdsSecurityGroup.addIngressRule(rdsRotationSecurityGroup, Port.tcp(rdsPort));
 
         // Bastion to RDS
-        rdsSecurityGroup.addIngressRule(bastionSecurityGroup, Port.tcp(RDS_PORT));
+        this.rdsSecurityGroup.addIngressRule(this.bastionSecurityGroup, Port.tcp(rdsPort));
 
         // SSH to Bastion
-        bastionSecurityGroup.addIngressRule(Peer.ipv4(`${MY_IP_ADDRESS}/32`), Port.tcp(22));
+        this.bastionSecurityGroup.addIngressRule(Peer.ipv4(`${props.myIpAddress}/32`), Port.tcp(22));
 
         /// /////////////////////////////////////////////////
         /// /////////////////////////////////////////////////
@@ -126,38 +148,38 @@ export default class SingleInstanceRdsStack extends cdk.Stack {
         // RDS
 
         // Database
-        const rds = new DatabaseInstance(this, 'RDSDB', {
+        this.rds = new DatabaseInstance(this, 'RDSDB', {
             engine: DatabaseInstanceEngine.postgres({
                 version: PostgresEngineVersion.VER_16,
             }),
-            vpc,
+            vpc: this.vpc,
             allowMajorVersionUpgrade: true,
-            credentials: Credentials.fromGeneratedSecret(APP_NAME, {
-                secretName: APP_NAME,
+            credentials: Credentials.fromGeneratedSecret(props.appName, {
+                secretName: props.appName,
                 encryptionKey: new Key(this, 'RDSDBSecretKMSKey', {
                     enableKeyRotation: true,
                     alias: 'RDSDBSecretKMSKey',
-                    removalPolicy: REMOVAL_POLICY,
+                    removalPolicy,
                 }),
             }),
-            databaseName: APP_NAME,
+            databaseName: props.appName,
             iamAuthentication: true,
-            instanceIdentifier: APP_NAME,
-            instanceType: DB_INSTANCE_TYPE,
-            removalPolicy: REMOVAL_POLICY,
+            instanceIdentifier: props.appName,
+            instanceType: dbInstanceType,
+            removalPolicy,
             storageEncryptionKey: new Key(this, 'RDSDBKMSKey', {
                 enableKeyRotation: true,
                 alias: 'RDSDBDBKMSKey',
-                removalPolicy: REMOVAL_POLICY,
+                removalPolicy,
             }),
             vpcSubnets: {
                 subnetType: SubnetType.PRIVATE_WITH_EGRESS,
             },
             securityGroups: [
-                rdsSecurityGroup,
+                this.rdsSecurityGroup,
             ],
-            port: RDS_PORT,
-            allocatedStorage: DB_STORAGE_GIB,
+            port: rdsPort,
+            allocatedStorage: dbStorageGib,
             storageType: StorageType.GP3,
             monitoringInterval: Duration.minutes(1),
             enablePerformanceInsights: true,
@@ -177,10 +199,10 @@ export default class SingleInstanceRdsStack extends cdk.Stack {
         });
 
         // Create the rotation credential
-        rds.secret!.addRotationSchedule('RDSDBSecretRotation', {
-            automaticallyAfter: PASSWORD_ROTATION_INTERVAL,
+        this.rds.secret!.addRotationSchedule('RDSDBSecretRotation', {
+            automaticallyAfter: passwordRotationInterval,
             hostedRotation: HostedRotation.postgreSqlSingleUser({
-                vpc,
+                vpc: this.vpc,
                 vpcSubnets: {
                     subnetType: SubnetType.PRIVATE_WITH_EGRESS,
                 },
@@ -198,15 +220,15 @@ export default class SingleInstanceRdsStack extends cdk.Stack {
         // Bastion
 
         // EC2 instance
-        const bastion = new Instance(this, 'BastionHost', {
+        this.bastion = new Instance(this, 'BastionHost', {
             instanceType: InstanceType.of(InstanceClass.T3, InstanceSize.MICRO),
             machineImage: MachineImage.latestAmazonLinux2023(),
-            vpc,
+            vpc: this.vpc,
             vpcSubnets: {
                 subnetType: SubnetType.PUBLIC,
             },
-            keyPair: KeyPair.fromKeyPairName(this, 'BastionKeyPair', BASTION_KEY_PAIR_NAME),
-            securityGroup: bastionSecurityGroup,
+            keyPair: KeyPair.fromKeyPairName(this, 'BastionKeyPair', props.bastionKeyPairName),
+            securityGroup: this.bastionSecurityGroup,
             blockDevices: [
                 {
                     deviceName: '/dev/xvda',
@@ -218,7 +240,7 @@ export default class SingleInstanceRdsStack extends cdk.Stack {
                         kmsKey: new Key(this, 'BastionKMSKey', {
                             enableKeyRotation: true,
                             alias: 'BastionKMSKey',
-                            removalPolicy: REMOVAL_POLICY,
+                            removalPolicy,
                         }),
                     }),
                 },
@@ -238,7 +260,7 @@ export default class SingleInstanceRdsStack extends cdk.Stack {
         const alarms = [
             // >= 90% CPU for over 3 minutes
             new Alarm(this, 'RDSCPUAlarm', {
-                metric: rds.metricCPUUtilization({
+                metric: this.rds.metricCPUUtilization({
                     period: Duration.minutes(1),
                 }),
                 alarmName: 'RDSCPUAlarm',
@@ -252,11 +274,11 @@ export default class SingleInstanceRdsStack extends cdk.Stack {
             new Alarm(this, 'RDSStorageAlarm', {
                 metric: new MathExpression({
                     usingMetrics: {
-                        freeSpace: rds.metricFreeStorageSpace({
+                        freeSpace: this.rds.metricFreeStorageSpace({
                             period: Duration.minutes(1),
                         }),
                     },
-                    expression: `freeSpace / (${DB_STORAGE_GIB} * 1024 * 1024 * 1024)`,
+                    expression: `freeSpace / (${dbStorageGib} * 1024 * 1024 * 1024)`,
                     label: 'FreeStorageSpace',
                 }),
                 alarmName: 'RDSStorageAlarm',
@@ -270,12 +292,12 @@ export default class SingleInstanceRdsStack extends cdk.Stack {
         // Logs widget
         const logQueryWidget = new LogQueryWidget({
             logGroupNames: [
-                `/aws/rds/instance/${APP_NAME}/postgresql`,
+                `/aws/rds/instance/${props.appName}/postgresql`,
             ],
             title: 'Last 100 queries and durations',
             view: LogQueryVisualizationType.TABLE,
             queryString: `
-            filter @logStream = '${APP_NAME}.0'
+            filter @logStream = '${props.appName}.0'
             | filter @message like /execute/
             | fields @timestamp
             | parse @message "duration: * ms  execute <unnamed>: *" as query_duration, sql_query
@@ -309,15 +331,33 @@ export default class SingleInstanceRdsStack extends cdk.Stack {
         /// /////////////////////////////////////////////////
         // Outputs
 
+        // VPC ID
+        new CfnOutput(this, 'VpcIdOutput', {
+            value: this.vpc.vpcId,
+            exportName: 'VpcId',
+        });
+
+        // RDS security group
+        new CfnOutput(this, 'RDSSecurityGroupOutput', {
+            value: this.rdsSecurityGroup.securityGroupId,
+            exportName: 'RDSSecurityGroupOutput',
+        });
+
+        // Bastion security group
+        new CfnOutput(this, 'BastionSecurityGroupOutput', {
+            value: this.bastionSecurityGroup.securityGroupId,
+            exportName: 'BastionSecurityGroupOutput',
+        });
+
         // Bastion DNS
         new CfnOutput(this, 'BastionHostDNS', {
-            value: bastion.instancePublicDnsName,
+            value: this.bastion.instancePublicDnsName,
             exportName: 'BastionHostDNS',
         });
 
         // Secret ARN
         new CfnOutput(this, 'RDSSecretARN', {
-            value: rds.secret!.secretFullArn!,
+            value: this.rds.secret!.secretFullArn!,
             exportName: 'RDSSecretARN',
         });
 
@@ -327,6 +367,6 @@ export default class SingleInstanceRdsStack extends cdk.Stack {
         /// /////////////////////////////////////////////////
         // Tags
 
-        Tags.of(this).add('project', APP_NAME);
+        Tags.of(this).add('project', props.appName);
     }
 }

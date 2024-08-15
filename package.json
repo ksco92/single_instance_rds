@@ -1,9 +1,13 @@
 {
     "name": "single_instance_rds",
-    "version": "0.1.0",
+    "version": "0.1.3",
     "bin": {
         "single_instance_rds": "bin/single_instance_rds.js"
     },
+    "files": [
+        "lib"
+    ],
+    "main": "lib/index.ts",
     "scripts": {
         "build": "tsc",
         "watch": "tsc -w",

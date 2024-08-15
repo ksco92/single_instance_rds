@@ -1,13 +1,16 @@
 import {App} from 'aws-cdk-lib';
 import {Template} from 'aws-cdk-lib/assertions';
 import SingleInstanceRdsStack from '../lib/single_instance_rds-stack';
-import {
-    APP_NAME, BASTION_KEY_PAIR_NAME, DB_STORAGE_GIB, RDS_PORT,
-} from '../lib/constants';
 
 test('Test resource creation', () => {
+    const appName = 'mycooldb';
+
     const app = new App();
-    const stack = new SingleInstanceRdsStack(app, 'MyTestStack');
+    const stack = new SingleInstanceRdsStack(app, 'MyTestStack', {
+        appName: 'mycooldb',
+        bastionKeyPairName: 'someKey',
+        myIpAddress: '1.2.3.4',
+    });
     const template = Template.fromStack(stack);
 
     /// /////////////////////////////////////////////////
@@ -26,7 +29,7 @@ test('Test resource creation', () => {
             },
             {
                 Key: 'project',
-                Value: APP_NAME,
+                Value: appName,
             },
         ],
     });
@@ -49,9 +52,9 @@ test('Test resource creation', () => {
 
     // RDS instance
     template.hasResourceProperties('AWS::RDS::DBInstance', {
-        DBInstanceIdentifier: APP_NAME,
-        AllocatedStorage: DB_STORAGE_GIB.toString(),
-        Port: RDS_PORT.toString(),
+        DBInstanceIdentifier: appName,
+        AllocatedStorage: '20',
+        Port: '5432',
     });
 
     // Credential rotation
@@ -69,7 +72,7 @@ test('Test resource creation', () => {
 
     // Bastion
     template.hasResourceProperties('AWS::EC2::Instance', {
-        KeyName: BASTION_KEY_PAIR_NAME,
+        KeyName: 'someKey',
     });
 
     /// /////////////////////////////////////////////////
