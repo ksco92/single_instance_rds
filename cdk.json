@@ -1,5 +1,5 @@
 {
-  "app": "npx ts-node --prefer-ts-exts bin/single_instance_rds.ts",
+  "app": "npx ts-node --prefer-ts-exts bin/single-instance-rds.ts",
   "watch": {
     "include": [
       "**"

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import 'source-map-support/register';
 import {App} from 'aws-cdk-lib';
-import SingleInstanceRdsStack from '../lib/single_instance_rds-stack';
+import SingleInstanceRdsStack from '../lib/single-instance-rds-stack';
 
 const app = new App();
 new SingleInstanceRdsStack(app, 'SingleInstanceRdsStack', {

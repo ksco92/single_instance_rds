@@ -1,6 +1,6 @@
 import {App} from 'aws-cdk-lib';
 import {Template} from 'aws-cdk-lib/assertions';
-import SingleInstanceRdsStack from '../lib/single_instance_rds-stack';
+import SingleInstanceRdsStack from '../lib/single-instance-rds-stack';
 
 test('Test resource creation', () => {
     const appName = 'mycooldb';
