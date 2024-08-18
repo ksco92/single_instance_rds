@@ -10,6 +10,8 @@ test('Test resource creation', () => {
         appName: 'mycooldb',
         bastionKeyPairName: 'someKey',
         myIpAddress: '1.2.3.4',
+        withNlb: true,
+        applicationIpAddress: '1.2.3.4',
     });
     const template = Template.fromStack(stack);
 
@@ -53,8 +55,8 @@ test('Test resource creation', () => {
     template.resourceCountIs('AWS::EC2::VPCEndpoint', 1);
 
     // SGs for RDS, rotation Lambda, bastion host, SM endpoint,
-    // NAT instance
-    template.resourceCountIs('AWS::EC2::SecurityGroup', 5);
+    // NAT instance, NLB
+    template.resourceCountIs('AWS::EC2::SecurityGroup', 6);
 
     /// /////////////////////////////////////////////////
     /// /////////////////////////////////////////////////
@@ -67,9 +69,12 @@ test('Test resource creation', () => {
         DBInstanceIdentifier: appName,
         AllocatedStorage: '20',
         Port: '5432',
-        // TODO: Add check for performance insights
-        // TODO: Add check for DB encryption
-        // TODO: Add check for CW log exports
+        EnablePerformanceInsights: true,
+        PerformanceInsightsRetentionPeriod: 93,
+        StorageEncrypted: true,
+        EnableCloudwatchLogsExports: [
+            'postgresql',
+        ],
     });
 
     // Credential rotation
@@ -88,7 +93,31 @@ test('Test resource creation', () => {
     // Bastion
     template.hasResourceProperties('AWS::EC2::Instance', {
         KeyName: 'someKey',
-        // TODO: Add checks for encryption on root drive
+        BlockDeviceMappings: [
+            {
+                DeviceName: '/dev/xvda',
+                Ebs: {
+                    Encrypted: true,
+                },
+            },
+        ],
+    });
+
+    /// /////////////////////////////////////////////////
+    /// /////////////////////////////////////////////////
+    /// /////////////////////////////////////////////////
+    /// /////////////////////////////////////////////////
+    // Network load balancer
+
+    template.hasResourceProperties('AWS::ElasticLoadBalancingV2::LoadBalancer', {
+        Name: 'RDSNLB',
+        Scheme: 'internet-facing',
+        Type: 'network',
+    });
+
+    template.hasResourceProperties('AWS::ElasticLoadBalancingV2::Listener', {
+        Port: 5432,
+        Protocol: 'TCP',
     });
 
     /// /////////////////////////////////////////////////
@@ -113,7 +142,6 @@ test('Test resource creation', () => {
     // Dashboard
     template.hasResourceProperties('AWS::CloudWatch::Dashboard', {
         DashboardName: 'RDSDashboard',
-        // TODO: Add check for log widget
     });
 
     /// /////////////////////////////////////////////////
@@ -121,6 +149,8 @@ test('Test resource creation', () => {
     /// /////////////////////////////////////////////////
     /// /////////////////////////////////////////////////
     // Output
+
+    expect(Object.keys(template.findOutputs('*')).length).toBe(6);
 
     template.hasOutput('VpcIdOutput', {
         Export: {
@@ -140,9 +170,21 @@ test('Test resource creation', () => {
         },
     });
 
+    template.hasOutput('BastionHostDNSOutput', {
+        Export: {
+            Name: 'BastionHostDNSOutput',
+        },
+    });
+
     template.hasOutput('RDSSecretARNOutput', {
         Export: {
             Name: 'RDSSecretARNOutput',
+        },
+    });
+
+    template.hasOutput('NLBDNSOutput', {
+        Export: {
+            Name: 'NLBDNSOutput',
         },
     });
 });

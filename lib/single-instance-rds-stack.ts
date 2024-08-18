@@ -14,6 +14,8 @@ interface SingleInstanceRdsStackProps extends StackProps {
     passwordRotationInterval?: Duration;
     rdsPort?: number;
     removalPolicy?: RemovalPolicy;
+    withNlb?: boolean;
+    applicationIpAddress?: string;
 }
 
 export default class SingleInstanceRdsStack extends Stack {
@@ -30,6 +32,8 @@ export default class SingleInstanceRdsStack extends Stack {
             passwordRotationInterval: props.passwordRotationInterval,
             rdsPort: props.rdsPort,
             removalPolicy: props.removalPolicy,
+            withNlb: props.withNlb,
+            applicationIpAddress: props.applicationIpAddress,
         });
     }
 }

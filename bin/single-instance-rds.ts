@@ -8,4 +8,6 @@ new SingleInstanceRdsStack(app, 'SingleInstanceRdsStack', {
     appName: 'mycooldb',
     bastionKeyPairName: 'single-rds-bastion',
     myIpAddress: '1.2.3.4',
+    withNlb: true,
+    applicationIpAddress: '1.2.3.4',
 });

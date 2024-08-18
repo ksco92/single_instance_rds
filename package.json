@@ -1,6 +1,6 @@
 {
     "name": "single_instance_rds",
-    "version": "0.1.6",
+    "version": "0.1.7",
     "bin": {
         "single_instance_rds": "bin/single-instance-rds.js"
     },

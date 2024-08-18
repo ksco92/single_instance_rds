@@ -43,6 +43,9 @@ import {
 } from 'aws-cdk-lib/aws-cloudwatch';
 import {LogGroup, RetentionDays} from 'aws-cdk-lib/aws-logs';
 import {ServicePrincipal} from 'aws-cdk-lib/aws-iam';
+import {NetworkLoadBalancer, NetworkTargetGroup, TargetType} from 'aws-cdk-lib/aws-elasticloadbalancingv2';
+import {AwsCustomResource, AwsCustomResourcePolicy, PhysicalResourceId} from 'aws-cdk-lib/custom-resources';
+import {IpTarget} from 'aws-cdk-lib/aws-elasticloadbalancingv2-targets';
 
 // TODO: Cloudtrail
 
@@ -56,6 +59,8 @@ interface SingleInstanceRdsProps extends StackProps {
     passwordRotationInterval?: Duration;
     rdsPort?: number;
     removalPolicy?: RemovalPolicy;
+    withNlb?: boolean;
+    applicationIpAddress?: string;
 }
 
 export default class SingleInstanceRds {
@@ -69,6 +74,16 @@ export default class SingleInstanceRds {
 
     bastion: Instance;
 
+    nlb?: NetworkLoadBalancer;
+
+    current_timestamp = new Date().toISOString()
+        // eslint-disable-next-line prefer-regex-literals
+        .replace(new RegExp('\\.', 'g'), '')
+        // eslint-disable-next-line prefer-regex-literals
+        .replace(new RegExp(':', 'g'), '')
+        // eslint-disable-next-line prefer-regex-literals
+        .replace(new RegExp('-', 'g'), '');
+
     constructor(props: SingleInstanceRdsProps) {
         const {scope,} = props;
         const dbInstanceType = props.dbInstanceType
@@ -80,6 +95,8 @@ export default class SingleInstanceRds {
             : Duration.days(1);
         const rdsPort = props.rdsPort ? props.rdsPort : 5432;
         const removalPolicy = props.removalPolicy ? props.removalPolicy : RemovalPolicy.DESTROY;
+        const withNlb = props.withNlb ? props.withNlb : false;
+        const applicationIpAddress = props.applicationIpAddress ? props.applicationIpAddress : '';
 
         /// /////////////////////////////////////////////////
         /// /////////////////////////////////////////////////
@@ -273,6 +290,90 @@ export default class SingleInstanceRds {
         /// /////////////////////////////////////////////////
         /// /////////////////////////////////////////////////
         /// /////////////////////////////////////////////////
+        // Network load balancer
+
+        if (withNlb) {
+            // NLB security group
+            const nlbSecurityGroup = new SecurityGroup(scope, 'NLBSecurityGroup', {
+                securityGroupName: 'NLBSecurityGroup',
+                vpc: this.vpc,
+            });
+
+            this.rdsSecurityGroup.addIngressRule(nlbSecurityGroup, Port.tcp(rdsPort));
+
+            // If no IP is passed...
+            if (applicationIpAddress === '') {
+                throw new Error('Property applicationIpAddress is needed when withNlb === true.');
+                // If open to the internet...
+            } else if (applicationIpAddress === '0.0.0.0') {
+                nlbSecurityGroup.addIngressRule(Peer.anyIpv4(), Port.tcp(rdsPort));
+            } else {
+                nlbSecurityGroup.addIngressRule(Peer.ipv4(`${applicationIpAddress}/32`), Port.tcp(rdsPort));
+            }
+
+            // Network load balancer
+            this.nlb = new NetworkLoadBalancer(scope, 'RDSNLB', {
+                vpc: this.vpc,
+                vpcSubnets: {
+                    subnetType: SubnetType.PUBLIC,
+                },
+                internetFacing: true,
+                securityGroups: [
+                    nlbSecurityGroup,
+                ],
+                loadBalancerName: 'RDSNLB',
+            });
+
+            // RDS private IP
+            const getPrivateIp = new AwsCustomResource(scope, `GetPrivateIp${this.current_timestamp}`, {
+                onUpdate: {
+                    service: 'EC2',
+                    action: 'describeNetworkInterfaces',
+                    parameters: {
+                        Filters: [
+                            {
+                                Name: 'group-id',
+                                Values: [
+                                    this.rdsSecurityGroup.securityGroupId,
+                                ],
+                            },
+                        ],
+                    },
+                    physicalResourceId: PhysicalResourceId.of(`GetPrivateIp${this.current_timestamp}`),
+                },
+                policy: AwsCustomResourcePolicy.fromSdkCalls({
+                    resources: AwsCustomResourcePolicy.ANY_RESOURCE,
+                }),
+                logRetention: RetentionDays.ONE_DAY,
+            });
+
+            // The IP depends on RDS
+            getPrivateIp.node.addDependency(this.rds);
+
+            // The NLB depends on the IP
+            this.nlb.node.addDependency(getPrivateIp);
+
+            // NLB listener
+            this.nlb.addListener('RDSListener', {
+                port: rdsPort,
+                defaultTargetGroups: [
+                    new NetworkTargetGroup(scope, 'RDSTargetGroup', {
+                        port: rdsPort,
+                        targetType: TargetType.IP,
+                        targets: [
+                            new IpTarget(getPrivateIp.getResponseField('NetworkInterfaces.0.PrivateIpAddress')),
+                        ],
+                        vpc: this.vpc,
+                        targetGroupName: 'RDSTargetGroup',
+                    }),
+                ],
+            });
+        }
+
+        /// /////////////////////////////////////////////////
+        /// /////////////////////////////////////////////////
+        /// /////////////////////////////////////////////////
+        /// /////////////////////////////////////////////////
         // Dashboard and alarms
 
         const width = 6;
@@ -327,8 +428,8 @@ export default class SingleInstanceRds {
             | sort @timestamp desc
             | limit 100
             `,
-            width: width * 2,
-            height: height * 2,
+            width: width * 3,
+            height: height * 3,
         });
 
         // Logs widget for VPC flow logs
@@ -343,8 +444,8 @@ export default class SingleInstanceRds {
             | sort @timestamp desc
             | limit 100
             `,
-            width: width * 2,
-            height: height * 2,
+            width: width * 3,
+            height: height * 3,
         });
 
         // CW dashboard
@@ -402,6 +503,14 @@ export default class SingleInstanceRds {
             value: this.rds.secret!.secretFullArn!,
             exportName: 'RDSSecretARNOutput',
         });
+
+        // NLB DNS
+        if (withNlb) {
+            new CfnOutput(scope, 'NLBDNSOutput', {
+                value: this.nlb!.loadBalancerDnsName,
+                exportName: 'NLBDNSOutput',
+            });
+        }
 
         /// /////////////////////////////////////////////////
         /// /////////////////////////////////////////////////
