@@ -1,3 +1,3 @@
-import SingleInstanceRdsStack from './single-instance-rds-stack';
+import SingleInstanceRds from './single-instance-rds';
 
-export default SingleInstanceRdsStack;
+export default SingleInstanceRds;
