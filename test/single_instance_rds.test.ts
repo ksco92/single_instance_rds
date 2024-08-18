@@ -34,6 +34,18 @@ test('Test resource creation', () => {
         ],
     });
 
+    // Flow logs
+    template.hasResourceProperties('AWS::EC2::FlowLog', {
+        LogDestinationType: 'cloud-watch-logs',
+        TrafficType: 'ALL',
+    });
+
+    // Flow logs log group
+    template.hasResourceProperties('AWS::Logs::LogGroup', {
+        LogGroupName: 'vpcflowlogs',
+        RetentionInDays: 365,
+    });
+
     // 4 subnets (2 private, 2 public)
     template.resourceCountIs('AWS::EC2::Subnet', 4);
 
@@ -55,6 +67,9 @@ test('Test resource creation', () => {
         DBInstanceIdentifier: appName,
         AllocatedStorage: '20',
         Port: '5432',
+        // TODO: Add check for performance insights
+        // TODO: Add check for DB encryption
+        // TODO: Add check for CW log exports
     });
 
     // Credential rotation
@@ -73,6 +88,7 @@ test('Test resource creation', () => {
     // Bastion
     template.hasResourceProperties('AWS::EC2::Instance', {
         KeyName: 'someKey',
+        // TODO: Add checks for encryption on root drive
     });
 
     /// /////////////////////////////////////////////////
@@ -97,5 +113,36 @@ test('Test resource creation', () => {
     // Dashboard
     template.hasResourceProperties('AWS::CloudWatch::Dashboard', {
         DashboardName: 'RDSDashboard',
+        // TODO: Add check for log widget
+    });
+
+    /// /////////////////////////////////////////////////
+    /// /////////////////////////////////////////////////
+    /// /////////////////////////////////////////////////
+    /// /////////////////////////////////////////////////
+    // Output
+
+    template.hasOutput('VpcIdOutput', {
+        Export: {
+            Name: 'VpcIdOutput',
+        },
+    });
+
+    template.hasOutput('RDSSecurityGroupOutput', {
+        Export: {
+            Name: 'RDSSecurityGroupOutput',
+        },
+    });
+
+    template.hasOutput('BastionSecurityGroupOutput', {
+        Export: {
+            Name: 'BastionSecurityGroupOutput',
+        },
+    });
+
+    template.hasOutput('RDSSecretARNOutput', {
+        Export: {
+            Name: 'RDSSecretARNOutput',
+        },
     });
 });

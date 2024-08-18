@@ -9,3 +9,5 @@ cdk.out
 
 .idea
 *.iml
+
+coverage

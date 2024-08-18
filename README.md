@@ -2,7 +2,7 @@
 
 **Important note:** Deploying this will cost you money. Parts of this deployment are not in the AWS free tier.
 
-**Another important note:** Please check the `lib/constants.ts` file to set the values you want. By default, the IP and KP name are blank and the deployment will fail unless you change it.
+**Another important note:** Please check the `bin/single-instance-rds` file to set the values you want. By default, the IP and KP name are dummy values and the deployment will fail unless you change it.
 
 **And another one:** Usually, single instance DBs are not production recommended due to availability and
 fault tolerance. Also, this uses a NAT instance instead of a NAT gateway for cost purposes.

@@ -5,6 +5,8 @@ import {Construct} from 'constructs';
 import {
     BlockDeviceVolume,
     EbsDeviceVolumeType,
+    FlowLogDestination,
+    FlowLogTrafficType,
     Instance,
     InstanceClass,
     InstanceSize,
@@ -39,9 +41,9 @@ import {
     LogQueryWidget,
     MathExpression,
 } from 'aws-cdk-lib/aws-cloudwatch';
-import {RetentionDays} from 'aws-cdk-lib/aws-logs';
+import {LogGroup, RetentionDays} from 'aws-cdk-lib/aws-logs';
+import {ServicePrincipal} from 'aws-cdk-lib/aws-iam';
 
-// TODO: VPC flow logs
 // TODO: Cloudtrail
 
 interface SingleInstanceRdsProps extends StackProps {
@@ -85,6 +87,15 @@ export default class SingleInstanceRds {
         /// /////////////////////////////////////////////////
         // Networking
 
+        // Flow logs KMS key
+        const flowLogsKmsKey = new Key(scope, 'VPCFlowLogsKMSKey', {
+            enableKeyRotation: true,
+            alias: 'VPCFlowLogsKMSKey',
+            removalPolicy,
+        });
+
+        flowLogsKmsKey.grantEncryptDecrypt(new ServicePrincipal('logs.amazonaws.com'));
+
         // VPC with 2 private and 2 public subnets
         this.vpc = new Vpc(scope, 'MainVPC', {
             ipAddresses: IpAddresses.cidr('10.0.0.0/16'),
@@ -104,6 +115,17 @@ export default class SingleInstanceRds {
                 instanceType: InstanceType.of(InstanceClass.T3, InstanceSize.MICRO),
             }),
             natGateways: 1,
+            flowLogs: {
+                cw: {
+                    destination: FlowLogDestination.toCloudWatchLogs(new LogGroup(scope, 'VPCFlowLogs', {
+                        encryptionKey: flowLogsKmsKey,
+                        removalPolicy,
+                        logGroupName: 'vpcflowlogs',
+                        retention: RetentionDays.ONE_YEAR,
+                    })),
+                    trafficType: FlowLogTrafficType.ALL,
+                },
+            },
         });
 
         // Secrets manager endpoint
@@ -289,8 +311,8 @@ export default class SingleInstanceRds {
             }),
         ];
 
-        // Logs widget
-        const logQueryWidget = new LogQueryWidget({
+        // Logs widget for PG queries
+        const pgLogQueryWidget = new LogQueryWidget({
             logGroupNames: [
                 `/aws/rds/instance/${props.appName}/postgresql`,
             ],
@@ -300,7 +322,24 @@ export default class SingleInstanceRds {
             filter @logStream = '${props.appName}.0'
             | filter @message like /execute/
             | fields @timestamp
+            | parse @message /UTC:(?<client_ip>[\\d.]+)\\(\\d+\\):(?<db_user>[^\\s]+)@/
             | parse @message "duration: * ms  execute <unnamed>: *" as query_duration, sql_query
+            | sort @timestamp desc
+            | limit 100
+            `,
+            width: width * 2,
+            height: height * 2,
+        });
+
+        // Logs widget for VPC flow logs
+        const flowLogsQueryWidget = new LogQueryWidget({
+            logGroupNames: [
+                'vpcflowlogs',
+            ],
+            title: 'Last 100 VPC flow logs',
+            view: LogQueryVisualizationType.TABLE,
+            queryString: `
+            fields @timestamp, @message
             | sort @timestamp desc
             | limit 100
             `,
@@ -319,7 +358,10 @@ export default class SingleInstanceRds {
                     width,
                 })),
                 [
-                    logQueryWidget,
+                    pgLogQueryWidget,
+                ],
+                [
+                    flowLogsQueryWidget,
                 ],
             ],
             defaultInterval: Duration.hours(12),
@@ -334,7 +376,7 @@ export default class SingleInstanceRds {
         // VPC ID
         new CfnOutput(scope, 'VpcIdOutput', {
             value: this.vpc.vpcId,
-            exportName: 'VpcId',
+            exportName: 'VpcIdOutput',
         });
 
         // RDS security group
@@ -350,15 +392,15 @@ export default class SingleInstanceRds {
         });
 
         // Bastion DNS
-        new CfnOutput(scope, 'BastionHostDNS', {
+        new CfnOutput(scope, 'BastionHostDNSOutput', {
             value: this.bastion.instancePublicDnsName,
-            exportName: 'BastionHostDNS',
+            exportName: 'BastionHostDNSOutput',
         });
 
         // Secret ARN
-        new CfnOutput(scope, 'RDSSecretARN', {
+        new CfnOutput(scope, 'RDSSecretARNOutput', {
             value: this.rds.secret!.secretFullArn!,
-            exportName: 'RDSSecretARN',
+            exportName: 'RDSSecretARNOutput',
         });
 
         /// /////////////////////////////////////////////////
