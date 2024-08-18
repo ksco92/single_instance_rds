@@ -1,13 +1,13 @@
 {
     "name": "single_instance_rds",
-    "version": "0.1.8",
+    "version": "0.1.9",
     "bin": {
         "single_instance_rds": "bin/single-instance-rds.js"
     },
     "files": [
         "dist"
     ],
-    "main": "dist/index.ts",
+    "main": "dist/index.js",
     "types": "dist/index.d.ts",
     "scripts": {
         "build": "tsc",
